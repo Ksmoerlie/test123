@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TEC-IT Barcode PDF Generator</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      background: #f3f4f6;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .container {
+      background: white;
+      padding: 30px;
+      border-radius: 10px;
+      box-shadow: 0 5px 20px rgba(0, 0, 0, 0.1);
+      width: 100%;
+      max-width: 500px;
+    }
+    input, label, button {
+      width: 100%;
+      display: block;
+      margin-bottom: 20px;
+      font-size: 1rem;
+    }
+    input {
+      padding: 12px;
+    }
+    button {
+      padding: 14px;
+      background: #0078d4;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+    .progress-container {
+      margin-top: 20px;
+    }
+    .progress-bar {
+      background: #e5e7eb;
+      height: 10px;
+      border-radius: 5px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: #0078d4;
+      width: 0%;
+      transition: width 0.3s;
+    }
+    .progress-text {
+      font-size: 0.9rem;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>PDF Generator (TEC-IT Barcodes)</h2>
+    <form id="barcodeForm">
+      <label for="prefix">Prefix</label>
+      <input type="text" id="prefix" value="T" />
+
+      <label for="startNumber">Startnummer</label>
+      <input type="number" id="startNumber" value="5001" />
+
+      <label for="endNumber">Eindnummer</label>
+      <input type="number" id="endNumber" value="5010" />
+
+      <button type="submit" id="generateBtn">📄 PDF Genereren</button>
+    </form>
+
+    <div class="progress-container" id="progressContainer" style="display: none;">
+      <div class="progress-bar">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+      <div class="progress-text" id="progressText">Bezig...</div>
+    </div>
+  </div>
+
+  <!-- Bibliotheken -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+  <script>
+    const { jsPDF } = window.jspdf;
+
+    document.getElementById("barcodeForm").addEventListener("submit", async function (e) {
+      e.preventDefault();
+
+      const prefix = document.getElementById("prefix").value.trim();
+      const startNumber = parseInt(document.getElementById("startNumber").value);
+      const endNumber = parseInt(document.getElementById("endNumber").value);
+      const total = endNumber - startNumber + 1;
+
+      if (endNumber < startNumber || total > 1000) {
+        alert("Controleer je invoer (maximaal 1000 items)");
+        return;
+      }
+
+      await generatePDF(prefix, startNumber, endNumber);
+    });
+
+    // 🔧 Oplossing voor CORS-probleem: converteer TEC-IT afbeelding naar base64
+    async function getBarcodeAsBase64(code) {
+      const url = `https://barcode.tec-it.com/barcode.ashx?data=${encodeURIComponent(code)}&code=Code128&translate-esc=on`;
+
+      try {
+        const response = await fetch(url);
+        const blob = await response.blob();
+
+        return await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+      } catch (err) {
+        throw new Error("Barcode afbeelding kon niet geladen worden.");
+      }
+    }
+
+    async function generatePDF(prefix, startNumber, endNumber) {
+      const progressContainer = document.getElementById("progressContainer");
+      const progressFill = document.getElementById("progressFill");
+      const progressText = document.getElementById("progressText");
+      const generateBtn = document.getElementById("generateBtn");
+
+      progressContainer.style.display = "block";
+      generateBtn.disabled = true;
+
+      const pdf = new jsPDF("l", "mm", "a4");
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const total = endNumber - startNumber + 1;
+
+      for (let i = startNumber; i <= endNumber; i++) {
+        const code = prefix + i;
+        const progress = ((i - startNumber + 1) / total) * 100;
+        progressFill.style.width = progress + "%";
+        progressText.textContent = `Genereer ${code} (${i - startNumber + 1}/${total})`;
+
+        if (i > startNumber) pdf.addPage("l");
+
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(60);
+        const textWidth = pdf.getTextWidth(code);
+        pdf.text(code, (pageWidth - textWidth) / 2, 60);
+
+        try {
+          const base64Image = await getBarcodeAsBase64(code);
+
+          const imgWidth = 120;
+          const imgHeight = 40;
+          const imgX = (pageWidth - imgWidth) / 2;
+          const imgY = 90;
+
+          pdf.addImage(base64Image, "PNG", imgX, imgY, imgWidth, imgHeight);
+
+          pdf.setFontSize(28);
+          pdf.setFont("helvetica", "normal");
+          const textBelowWidth = pdf.getTextWidth(code);
+          pdf.text(code, (pageWidth - textBelowWidth) / 2, imgY + imgHeight + 20);
+        } catch (error) {
+          console.error("Barcode fout:", error);
+          pdf.setFontSize(20);
+          pdf.text("⚠️ Barcode fout", pageWidth / 2, 110, { align: "center" });
+        }
+      }
+
+      const filename = `barcodes_${prefix}${startNumber}-${endNumber}.pdf`;
+      pdf.save(filename);
+
+      progressText.textContent = `✅ PDF gegenereerd (${total} barcodes)`;
+      setTimeout(() => (progressContainer.style.display = "none"), 3000);
+      generateBtn.disabled = false;
+    }
+  </script>
+</body>
+</html>
